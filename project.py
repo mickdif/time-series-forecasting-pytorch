@@ -3,25 +3,22 @@
 
 
 from os import write
-import numpy as np #NumPy is the fundamental package for scientific computing in Python. 
-#It is a Python library that provides a multidimensional array object, various derived objects (such as masked arrays and matrices), 
-#and an assortment of routines for fast operations on arrays, including mathematical, logical, shape manipulation, sorting, 
-#selecting, I/O, discrete Fourier transforms, basic linear algebra, basic statistical operations, random simulation and much more.
+import numpy as np
+#NumPy is the fundamental package for scientific computing in Python. It is a Python library that provides a multidimensional array object
 
-
-import torch # PyTorch is a Python package that provides two high-level features:
-#Tensor computation (like NumPy) with strong GPU acceleration
-#Deep neural networks built on a tape-based autograd system
+import torch
+# PyTorch is a Python package that provides two high-level features:
+#   Tensor computation (like NumPy) with strong GPU acceleration
+#   Deep neural networks built on a tape-based autograd system
 import torch.nn as nn # These are the basic building blocks for graph
-import torch.nn.functional as F # Convolution functions
+import torch.nn.functional as F # Convolution functions (non usate?)
 import torch.optim as optim # is a package implementing various optimization algorithms
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
-
-# Matplotlib is a comprehensive library for creating static, animated, and interactive visualizations in Python. 
-# Matplotlib makes easy things easy and hard things possible. 
+ 
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import figure
+# Matplotlib is a comprehensive library for creating static, animated, and interactive visualizations in Python. 
 
 from alpha_vantage.timeseries import TimeSeries
 
@@ -30,7 +27,7 @@ print("All libraries loaded")
 # def file scrittura
 f = open('workfile.txt', 'w', encoding="utf-8")
 
-disegna=0
+make_plots = False
 
 config = {
     "alpha_vantage": {
@@ -79,13 +76,13 @@ def download_data(config):
     data_date.reverse()
 
     data_close_price = [float(data[date][config["alpha_vantage"]["key_adjusted_close"]]) for date in data.keys()]
-    # se ne deriva che data è stato restituito come matrice la cui prima riga è composta dalle date, e le successive dai valori di apertura chiusura etc, una riga ciascuno
-    # data_close_price è dunque la lista di tutti i valori di chiusura aggiustati, perché dire "per ciascuna data" è come dire tutti
+    # se ne deriva che data ï¿½ stato restituito come matrice la cui prima riga ï¿½ composta dalle date, e le successive dai valori di apertura chiusura etc, una riga ciascuno
+    # data_close_price ï¿½ dunque la lista di tutti i valori di chiusura aggiustati, perchï¿½ dire "per ciascuna data" ï¿½ come dire tutti
     data_close_price.reverse()
     data_close_price = np.array(data_close_price) # lo trasformo in array di numpy
 
     num_data_points = len(data_date)
-    display_date_range = "from " + data_date[0] + " to " + data_date[num_data_points-1] # è una stringa
+    display_date_range = "from " + data_date[0] + " to " + data_date[num_data_points-1] # ï¿½ una stringa
     print("Number data points", num_data_points, display_date_range)
 
     return data_date, data_close_price, num_data_points, display_date_range
@@ -99,7 +96,7 @@ data_date, data_close_price, num_data_points, display_date_range = download_data
 
 
     # plot
-if(disegna==1):
+if(make_plots == True):
     fig = figure(figsize=(25, 5), dpi=80)
     fig.patch.set_facecolor((1.0, 1.0, 1.0))
     plt.plot(data_date, data_close_price, color=config["plots"]["color_actual"])
@@ -160,7 +157,7 @@ def prepare_data_x(x, window_size): # x=normalized_data_close_price, windows_siz
     #         [2,3]
     #         [3,4]]
     # a ogni riga si scorre di uno
-    # occhio che una scelta sbagliata dei valori crea caos perché si cerca di inserire dati che non esistono
+    # occhio che una scelta sbagliata dei valori crea caos perchï¿½ si cerca di inserire dati che non esistono
     return output[:-1], output[-1]
     # [:-1] toglie l'ultimo valore
     # [-1] restituisce solo l'ultimo valore
@@ -172,14 +169,14 @@ def prepare_data_y(x, window_size):
 
     # use the next day as label
     output = x[window_size:]
-    # è una lista uguale ad x ma eliminati i primi window_size elementi
+    # ï¿½ una lista uguale ad x ma eliminati i primi window_size elementi
     return output
 
 data_x, data_x_unseen = prepare_data_x(normalized_data_close_price, window_size=config["data"]["window_size"])
-# data_x è una matrice 2d che contiene i prezzi degli ultimi 20 giorni degli ultimi 23 anni (da quando iniziano i dati, per IBM dal 99), tolto oggi
+# data_x ï¿½ una matrice 2d che contiene i prezzi degli ultimi 20 giorni degli ultimi 23 anni (da quando iniziano i dati, per IBM dal 99), tolto oggi
 # data_x_unseen era l'ultima riga, quindi i prezzi degli ultimi 20 giorni relativamente a oggi
 data_y = prepare_data_y(normalized_data_close_price, window_size=config["data"]["window_size"])
-# è uguale a normalized_data_close_price priva dei primi window_size (=20) elementi
+# ï¿½ uguale a normalized_data_close_price priva dei primi window_size (=20) elementi
 
 # DEBUG
 print("data_y")
@@ -207,7 +204,7 @@ to_plot_data_y_train = np.where(to_plot_data_y_train == 0, None, to_plot_data_y_
 to_plot_data_y_val = np.where(to_plot_data_y_val == 0, None, to_plot_data_y_val)
 
 # plots
-if(disegna==1):
+if(make_plots == True):
     fig = figure(figsize=(25, 5), dpi=80)
     fig.patch.set_facecolor((1.0, 1.0, 1.0))
     plt.plot(data_date, to_plot_data_y_train, label="Prices (train)", color=config["plots"]["color_train"])
@@ -241,7 +238,7 @@ dataset_val = TimeSeriesDataset(data_x_val, data_y_val)
 print("Train data shape", dataset_train.x.shape, dataset_train.y.shape)
 print("Validation data shape", dataset_val.x.shape, dataset_val.y.shape)
 
-train_dataloader = DataLoader(dataset_train, batch_size=config["training"]["batch_size"], shuffle=True) # DataLoader è di PyThorch
+train_dataloader = DataLoader(dataset_train, batch_size=config["training"]["batch_size"], shuffle=True) # DataLoader ï¿½ di PyThorch
 val_dataloader = DataLoader(dataset_val, batch_size=config["training"]["batch_size"], shuffle=True)
 
 
@@ -317,7 +314,7 @@ def run_epoch(dataloader, is_training=False):
 
     return epoch_loss, lr
 
-# le due righe qua di seguito sono le stesse che si trovano prima di delle def di classe e di fz qua sopra, non ne capisco l'utilità ma non sono dannose
+# le due righe qua di seguito sono le stesse che si trovano prima di delle def di classe e di fz qua sopra, non ne capisco l'utilitï¿½ ma non sono dannose
 train_dataloader = DataLoader(dataset_train, batch_size=config["training"]["batch_size"], shuffle=True)
 val_dataloader = DataLoader(dataset_val, batch_size=config["training"]["batch_size"], shuffle=True)
 
@@ -369,7 +366,7 @@ for idx, (x, y) in enumerate(val_dataloader):
 
 
 
-if(disegna==1):
+if(make_plots == True):
     # prepare data for plotting
 
     to_plot_data_y_train_pred = np.zeros(num_data_points)
@@ -429,7 +426,7 @@ prediction = model(x)
 prediction = prediction.cpu().detach().numpy()
 
 
-if(disegna==1):
+if(make_plots == True):
     # prepare plots
 
     plot_range = 10
@@ -441,7 +438,7 @@ if(disegna==1):
     to_plot_data_y_val_pred[:plot_range-1] = scaler.inverse_transform(predicted_val)[-plot_range+1:]
 
     to_plot_data_y_test_pred[plot_range-1] = scaler.inverse_transform(prediction)
-    # fa una conversione da array a scalare, occhio che è deprecato in numpy!
+    # fa una conversione da array a scalare, occhio che ï¿½ deprecato in numpy!
 
     to_plot_data_y_val = np.where(to_plot_data_y_val == 0, None, to_plot_data_y_val)
     to_plot_data_y_val_pred = np.where(to_plot_data_y_val_pred == 0, None, to_plot_data_y_val_pred)
