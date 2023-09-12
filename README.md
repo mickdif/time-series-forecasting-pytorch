@@ -1,4 +1,5 @@
 Fork per analizzare, commentare e modificare il codice.
+vd il file project.py
 
 Di seguito il README originale
 
