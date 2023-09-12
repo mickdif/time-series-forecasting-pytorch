@@ -1,0 +1,1 @@
+Epoch[1/2] | loss train:26.719191, test:8.847598 | lr:0.100000Epoch[2/2] | loss train:14.398884, test:5.453077 | lr:0.100000
