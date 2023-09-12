@@ -1,3 +1,7 @@
+Fork per analizzare, commentare e modificare il codice.
+
+Di seguito il README originale
+
 # Predicting Stock Prices with Deep Learning
 
 ## Project Overview
