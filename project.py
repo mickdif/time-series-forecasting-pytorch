@@ -58,9 +58,9 @@ config = {
     },
     "training": {
         "device": "cpu", # "cuda" or "cpu"
-        "batch_size": 5, # +++ MODIFICATO erano 64 (modifiche per effetturare test più rapidi sul codice)
-        "num_epoch": 2, # +++ MODIFICATO erano 100
-        "learning_rate": 0.1,# +++ MODIFICATO era 0.01
+        "batch_size": 64, # +++ MODIFICATO erano 64 (modifiche per effetturare test più rapidi sul codice)
+        "num_epoch": 100, # +++ MODIFICATO erano 100
+        "learning_rate": 0.01,# +++ MODIFICATO era 0.01
         "scheduler_step_size": 40,
     }
 }
@@ -195,19 +195,20 @@ data_x_val = data_x[split_index:]
 data_y_train = data_y[:split_index]
 data_y_val = data_y[split_index:]
 
-# prepare data for plotting
+if(make_plots == True):
+    # prepare data for plotting
 
-to_plot_data_y_train = np.zeros(num_data_points)
-to_plot_data_y_val = np.zeros(num_data_points)
+    to_plot_data_y_train = np.zeros(num_data_points)
+    to_plot_data_y_val = np.zeros(num_data_points)
 
-to_plot_data_y_train[config["data"]["window_size"]:split_index+config["data"]["window_size"]] = scaler.inverse_transform(data_y_train)
-to_plot_data_y_val[split_index+config["data"]["window_size"]:] = scaler.inverse_transform(data_y_val)
+    to_plot_data_y_train[config["data"]["window_size"]:split_index+config["data"]["window_size"]] = scaler.inverse_transform(data_y_train)
+    to_plot_data_y_val[split_index+config["data"]["window_size"]:] = scaler.inverse_transform(data_y_val)
 
-to_plot_data_y_train = np.where(to_plot_data_y_train == 0, None, to_plot_data_y_train)
-to_plot_data_y_val = np.where(to_plot_data_y_val == 0, None, to_plot_data_y_val)
+    to_plot_data_y_train = np.where(to_plot_data_y_train == 0, None, to_plot_data_y_train)
+    to_plot_data_y_val = np.where(to_plot_data_y_val == 0, None, to_plot_data_y_val)
 
 # plots
-if(make_plots == True):
+
     fig = figure(figsize=(25, 5), dpi=80)
     fig.patch.set_facecolor((1.0, 1.0, 1.0))
     plt.plot(data_date, to_plot_data_y_train, label="Prices (train)", color=config["plots"]["color_train"])
@@ -235,14 +236,14 @@ class TimeSeriesDataset(Dataset):
     def __getitem__(self, idx):
         return (self.x[idx], self.y[idx])
 
-
+# crei i dataset di allenamento e test
 dataset_train = TimeSeriesDataset(data_x_train, data_y_train)
 dataset_val = TimeSeriesDataset(data_x_val, data_y_val)
-
+# stampa dimensioni dei dataset
 print("Train data shape", dataset_train.x.shape, dataset_train.y.shape)
 print("Validation data shape", dataset_val.x.shape, dataset_val.y.shape)
-
-train_dataloader = DataLoader(dataset_train, batch_size=config["training"]["batch_size"], shuffle=True) # DataLoader di PyThorch
+# carica i dataset
+train_dataloader = DataLoader(dataset_train, batch_size=config["training"]["batch_size"], shuffle=True) # DataLoader e' di PyThorch
 val_dataloader = DataLoader(dataset_val, batch_size=config["training"]["batch_size"], shuffle=True)
 
 
@@ -254,7 +255,7 @@ class LSTMModel(nn.Module):
         self.linear_1 = nn.Linear(input_size, hidden_layer_size)
         self.relu = nn.ReLU()
         self.lstm = nn.LSTM(hidden_layer_size, hidden_size=self.hidden_layer_size, num_layers=num_layers,
-                            batch_first=True)
+                            batch_first=True) 
         self.dropout = nn.Dropout(dropout)
         self.linear_2 = nn.Linear(num_layers * hidden_layer_size, output_size)
 
@@ -322,6 +323,7 @@ def run_epoch(dataloader, is_training=False):
 train_dataloader = DataLoader(dataset_train, batch_size=config["training"]["batch_size"], shuffle=True)
 val_dataloader = DataLoader(dataset_val, batch_size=config["training"]["batch_size"], shuffle=True)
 
+# creazione della rete lstm
 model = LSTMModel(input_size=config["model"]["input_size"], hidden_layer_size=config["model"]["lstm_size"],
                   num_layers=config["model"]["num_lstm_layers"], output_size=1, dropout=config["model"]["dropout"])
 model = model.to(config["training"]["device"])
@@ -330,7 +332,7 @@ criterion = nn.MSELoss()
 optimizer = optim.Adam(model.parameters(), lr=config["training"]["learning_rate"], betas=(0.9, 0.98), eps=1e-9)
 scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=config["training"]["scheduler_step_size"], gamma=0.1)
 
-
+# allenamento
 for epoch in range(config["training"]["num_epoch"]):
     loss_train, lr_train = run_epoch(train_dataloader, is_training=True)
     loss_val, lr_val = run_epoch(val_dataloader)
@@ -367,7 +369,6 @@ for idx, (x, y) in enumerate(val_dataloader):
     out = model(x)
     out = out.cpu().detach().numpy()
     predicted_val = np.concatenate((predicted_val, out))
-
 
 
 if(make_plots == True):
@@ -425,29 +426,30 @@ if(make_plots == True):
 
 model.eval()
 
-x = torch.tensor(data_x_unseen).float().to(config["training"]["device"]).unsqueeze(0).unsqueeze(2) # this is the data type and shape required, [batch, sequence, feature]
+x = torch.tensor(data_x_unseen).float().to(config["training"]["device"]).unsqueeze(0).unsqueeze(2) # this is the data type and shape required: [batch, sequence, feature]
+print(x)
 prediction = model(x)
 prediction = prediction.cpu().detach().numpy()
 
 
-# prepare plots
-
-plot_range = 10
-to_plot_data_y_val = np.zeros(plot_range)
-to_plot_data_y_val_pred = np.zeros(plot_range)
-to_plot_data_y_test_pred = np.zeros(plot_range)
-
-to_plot_data_y_val[:plot_range-1] = scaler.inverse_transform(data_y_val)[-plot_range+1:]
-to_plot_data_y_val_pred[:plot_range-1] = scaler.inverse_transform(predicted_val)[-plot_range+1:]
-
-to_plot_data_y_test_pred[plot_range-1] = scaler.inverse_transform(prediction)
-# fa una conversione da array a scalare, occhio che � deprecato in numpy!
-
-to_plot_data_y_val = np.where(to_plot_data_y_val == 0, None, to_plot_data_y_val)
-to_plot_data_y_val_pred = np.where(to_plot_data_y_val_pred == 0, None, to_plot_data_y_val_pred)
-to_plot_data_y_test_pred = np.where(to_plot_data_y_test_pred == 0, None, to_plot_data_y_test_pred)
-
 if(make_plots == True):
+    # prepare plots
+
+    plot_range = 10
+    to_plot_data_y_val = np.zeros(plot_range)
+    to_plot_data_y_val_pred = np.zeros(plot_range)
+    to_plot_data_y_test_pred = np.zeros(plot_range)
+
+    to_plot_data_y_val[:plot_range-1] = scaler.inverse_transform(data_y_val)[-plot_range+1:]
+    to_plot_data_y_val_pred[:plot_range-1] = scaler.inverse_transform(predicted_val)[-plot_range+1:]
+
+    to_plot_data_y_test_pred[plot_range-1] = scaler.inverse_transform(prediction)
+    # fa una conversione da array a scalare, occhio che � deprecato in numpy!
+
+    to_plot_data_y_val = np.where(to_plot_data_y_val == 0, None, to_plot_data_y_val)
+    to_plot_data_y_val_pred = np.where(to_plot_data_y_val_pred == 0, None, to_plot_data_y_val_pred)
+    to_plot_data_y_test_pred = np.where(to_plot_data_y_test_pred == 0, None, to_plot_data_y_test_pred)
+
     # plot
 
     plot_date_test = data_date[-plot_range+1:]
@@ -464,8 +466,23 @@ if(make_plots == True):
     plt.show()
     fig.savefig('tomorrow.png', transparent=False, dpi=80, bbox_inches="tight")
 
-print("Predicted close price of the next trading day:", np.round(to_plot_data_y_test_pred[plot_range-1], 2)) # com'era
-print("Predicted close price of the next trading day:", np.round(scaler.inverse_transform(prediction), 2)) # uguale !!!
+#print("Predicted close price of the next trading day:", np.round(to_plot_data_y_test_pred[plot_range-1], 2)) # originale
+print("Predicted close price of the next trading day:", np.round(scaler.inverse_transform(prediction), 2)) # analogo
+np.savetxt("predizioni.txt", np.round(scaler.inverse_transform(prediction), 2))
 
+# le previsioni che vengono effettuate qua non sono visibilmente attendibili (+20% in 10 giorni, ad esempio)
+# il problema è che carico solo l'ultiamo previsione e non gli ultimi relativi 20 giorni, credo, ora ci lavoro
+# agg: anche avendo modificato in tal senso la previsione mi pare eccessivamente ottimista (da 140 a 165 in dieci gg)
+for i in range(10):
+    data_x_unseen = data_x_unseen[1:]
+    np.append(data_x_unseen, prediction)
+    
+    x = torch.tensor(prediction).float().to(config["training"]["device"]).unsqueeze(0).unsqueeze(2) 
+    prediction = model(x)
+    prediction = prediction.cpu().detach().numpy()
+    print("Predicted close price of the next day:", np.round(scaler.inverse_transform(prediction), 2))
+    # previsioni = np.concatenate(previsioni, np.round(scaler.inverse_transform(prediction), 2)) # non funziona
+
+# np.savetxt("predizioni.txt", previsioni)
 file_output.close()
 print("FINE")
