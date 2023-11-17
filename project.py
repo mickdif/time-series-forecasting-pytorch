@@ -1,45 +1,26 @@
-#da https://www.alphavantage.co/stock-prediction-deep-neural-networks-lstm/
-#In this project, we will train an LSTM model to predict stock price movements.
-
-
-from os import write
 import numpy as np
-#NumPy is the fundamental package for scientific computing in Python. It is a Python library that provides a multidimensional array object
-
+import yfinance as yf
+import pandas as pd
 import torch
-# PyTorch is a Python package that provides two high-level features:
-#   Tensor computation (like NumPy) with strong GPU acceleration
-#   Deep neural networks built on a tape-based autograd system
-import torch.nn as nn # These are the basic building blocks for graph
-import torch.nn.functional as F # Convolution functions (non usate?)
-import torch.optim as optim # is a package implementing various optimization algorithms
+import torch.nn as nn
+import torch.optim as optim
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
- 
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import figure
-# Matplotlib is a comprehensive library for creating static, animated, and interactive visualizations in Python. 
-
-from alpha_vantage.timeseries import TimeSeries
+from sklearn.metrics import mean_absolute_percentage_error, mean_squared_error
 
 print("All libraries loaded")
 
-# def file scrittura
-file_output = open('workfile.txt', 'w', encoding="utf-8")
-
-# L'elaborazione dei grafici è piuttosto lenta, quindi ho introdotto questa variabile e racchiuso i blocchi in cui vengono elaborati i grafici in un if(make_plots==True) nel caso non si fosse interessati ad avere i grafici
-make_plots = False
+disegna = 1
 
 config = {
-    "alpha_vantage": {
-        "key": "demo", # you can use the demo API key for this project, but please make sure to get your own API key at https://www.alphavantage.co/support/#api-key
-        "symbol": "IBM",
-        "outputsize": "full",# con key=demo non si può modificare a "compact" e quindi usare meno dati: i dati inclusi in full, nel caso di IBM, partono dal 99, sono circa 6000 giorni
-        "key_adjusted_close": "5. adjusted close", # note that we are using the adjusted close field of Alpha Vantage's daily adjusted API to remove any artificial price turbulences due to stock splits and dividend payout events. It is generally considered an industry best practice to use split/dividend-adjusted prices instead of raw prices to model stock price movements. 
-    },
+    "titolo": "TIT.MI", 
+    "periodo": "23y",
+    
     "data": {
-        "window_size": 20, # 
-        "train_split_size": 0.80, # quantità dei dati dei dati usati per il training
+        "window_size": 20,
+        "train_split_size": 0.80,
     },
     "plots": {
         "xticks_interval": 90, # show a date every 90 days
@@ -58,176 +39,74 @@ config = {
     },
     "training": {
         "device": "cpu", # "cuda" or "cpu"
-        "batch_size": 64, # +++ MODIFICATO erano 64 (modifiche per effetturare test più rapidi sul codice)
-        "num_epoch": 100, # +++ MODIFICATO erano 100
-        "learning_rate": 0.01,# +++ MODIFICATO era 0.01
+        "batch_size": 64,
+        "num_epoch": 100,
+        "learning_rate": 0.01,
         "scheduler_step_size": 40,
     }
 }
+with open('textfile.txt', 'w') as f: f.write(str(config))
 
-def download_data(config):
-    ts = TimeSeries(key=config["alpha_vantage"]["key"])
-    data, meta_data = ts.get_daily_adjusted(config["alpha_vantage"]["symbol"], outputsize=config["alpha_vantage"]["outputsize"])
-    # data viene restituito come matrice la cui prima riga e' composta dalle date e le successive dai valori di apertura, chiusura etc, una riga ciascuno
-    # vd https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&symbol=IBM&apikey=demo per la struttura dei dati
-    data_date = [date for date in data.keys()] # keys() restituisce la lista degli arg dell'ogg stesso
-    data_date.reverse()
+TIT = yf.Ticker(config["titolo"])
+hist = TIT.history(config["periodo"]) # get historical market data
+data = pd.DataFrame(hist) # data come indice
+data = data.drop(["Dividends", "Stock Splits", "Open", "High", "Low", "Volume"], axis=1)
 
-    data_close_price = [float(data[date][config["alpha_vantage"]["key_adjusted_close"]]) for date in data.keys()]
-    # data_close_price e' la lista di tutti i valori di chiusura, perche' dire "per ciascuna data" vale a dire tutti
-    data_close_price.reverse() # inverto l'array
-    data_close_price = np.array(data_close_price) # trasformo in array di numpy
-
-    num_data_points = len(data_date)
-    display_date_range = "from " + data_date[0] + " to " + data_date[num_data_points-1]
-    print("Number data points", num_data_points, display_date_range)
-
-    return data_date, data_close_price, num_data_points, display_date_range
-
-data_date, data_close_price, num_data_points, display_date_range = download_data(config)
-
-# stampo su file
-np.savetxt("data_close_price.txt", np.round(data_close_price,2))
-
-# DEBUG
-print("Data close price esempio")
-for i in range(2):
-    print(data_close_price)
-
-# plot
-if(make_plots == True):
-    fig = figure(figsize=(25, 5), dpi=80)
-    fig.patch.set_facecolor((1.0, 1.0, 1.0))
-    plt.plot(data_date, data_close_price, color=config["plots"]["color_actual"])
-    xticks = [data_date[i] if ((i%config["plots"]["xticks_interval"]==0 and (num_data_points-i) > config["plots"]["xticks_interval"]) or i==num_data_points-1) else None for i in range(num_data_points)] # make x ticks nice
-    x = np.arange(0,len(xticks))
-    plt.xticks(x, xticks, rotation='vertical')
-    plt.title("Daily close price for " + config["alpha_vantage"]["symbol"] + ", " + display_date_range)
-    plt.grid(visible=None, which='major', axis='y', linestyle='--')
-    # salva su disco senza mostrare
-    # plt.show()
-    fig.savefig('Fig_1: prezzi chiusura.png', transparent=False, dpi=80, bbox_inches="tight")
-
-
-# normalize
-print("Ora normalizzo")
+last_true = data.Close.values[-1]
+data_close_price, data_date = data.Close.values[:-1], data.index[:-1]
+num_data_points = len(data_date)-1
 
 class Normalizer():
-    # una gaussiana ha 2 parametri: mu (indica la media, il centro, la x del picco) e la variazione std
     def __init__(self):
         self.mu = None
         self.sd = None
 
-    def fit_transform(self, x): 
-        self.mu = np.mean(x, axis=(0), keepdims=True) # mean() calcola la media dei dati sull'asse specificato
-        self.sd = np.std(x, axis=(0), keepdims=True) # deviazione std
+    def fit_transform(self, x):
+        self.mu = np.mean(x, axis=(0), keepdims=True)
+        self.sd = np.std(x, axis=(0), keepdims=True)
         normalized_x = (x - self.mu)/self.sd
         return normalized_x
 
     def inverse_transform(self, x):
         return (x*self.sd) + self.mu
 
-
+# normalize
 scaler = Normalizer()
 normalized_data_close_price = scaler.fit_transform(data_close_price)
-# ora i valori sono normalizzati, prima andavano da 50 a 150, ora tra, circa, -1,9 e 2,1 (nel caso di IBM)
 
-# stampo su file
-np.savetxt("normalized_data_close_price.txt", np.round(normalized_data_close_price,2))
-
-# DEBUG
-print("normalized data close price example")
-for i in range(2):
-    print(normalized_data_close_price)
-    
-
-def prepare_data_x(x, window_size): # x=normalized_data_close_price, windows_size=20
-    # perform windowing
+def prepare_data_x(x, window_size): # perform windowing
     n_row = x.shape[0] - window_size + 1
-    # shape[0] in questo caso equivalente a lenght
-    # n_row corrisponde al numero di dati, nel caso di IBM abbiamo ciascun giorno lavorativa dal 99 a oggi, circa 6000 giorni
     output = np.lib.stride_tricks.as_strided(x, shape=(n_row, window_size), strides=(x.strides[0], x.strides[0]))
-    # shape lo rende una matrice di n_row righe e windows_size colonne
-    # strides definisce il passo, ma non mi è chiaro come lavori
-    # output: in ogni riga della matrice ci sono i prezzi di chiusura adj degli ultimi 20 giorni
-    # ad esempio
-    # sia x=[1,2,3,4]
-    # output=[[1,2]
-    #         [2,3]
-    #         [3,4]]
-    # a ogni riga si scorre di uno
-    # attenzione che una scelta sbagliata degli arg di shape crea risultati inattesi perche' si cerca di inserire dati che non esistono
     return output[:-1], output[-1]
-    # [:-1] toglie l'ultimo valore, quindi la matrice priva dell'ultima riga
-    # [-1] restituisce solo l'ultimo valore, cioe' una l'ultima riga: una lista
 
-
-def prepare_data_y(x, window_size):
-    # perform simple moving average
-    # output = np.convolve(x, np.ones(window_size), 'valid') / window_size
-
-    # use the next day as label
+def prepare_data_y(x, window_size): # use the next day as label
     output = x[window_size:]
-    # lista uguale ad x ma priva dei primi window_size elementi
     return output
 
 data_x, data_x_unseen = prepare_data_x(normalized_data_close_price, window_size=config["data"]["window_size"])
-# data_x e' una matrice 2d che contiene i prezzi degli ultimi 20 giorni riferiti a ciascun giorno degli ultimi 23 anni (da quando iniziano i dati per IBM), tolto oggi
-# data_x_unseen era l'ultima riga, quindi i prezzi degli ultimi 20 giorni relativamente a oggi
+
 data_y = prepare_data_y(normalized_data_close_price, window_size=config["data"]["window_size"])
-# uguale a normalized_data_close_price priva dei primi window_size (=20) elementi
-
-# DEBUG
-print("data_x example")
-for i in range(2):
-    print(data_x)
-print("data_x_unseen")
-print(data_x_unseen)
-
+print(data_x.shape)
+print(data_x_unseen.shape)
+print(data_y.shape)
 
 # split dataset
-# si dividono i dati di training da quelli di test
-
 split_index = int(data_y.shape[0]*config["data"]["train_split_size"])
 data_x_train = data_x[:split_index]
 data_x_val = data_x[split_index:]
-
 data_y_train = data_y[:split_index]
 data_y_val = data_y[split_index:]
 
-if(make_plots == True):
-    # prepare data for plotting
-
-    to_plot_data_y_train = np.zeros(num_data_points)
-    to_plot_data_y_val = np.zeros(num_data_points)
-
-    to_plot_data_y_train[config["data"]["window_size"]:split_index+config["data"]["window_size"]] = scaler.inverse_transform(data_y_train)
-    to_plot_data_y_val[split_index+config["data"]["window_size"]:] = scaler.inverse_transform(data_y_val)
-
-    to_plot_data_y_train = np.where(to_plot_data_y_train == 0, None, to_plot_data_y_train)
-    to_plot_data_y_val = np.where(to_plot_data_y_val == 0, None, to_plot_data_y_val)
-
-# plots
-
-    fig = figure(figsize=(25, 5), dpi=80)
-    fig.patch.set_facecolor((1.0, 1.0, 1.0))
-    plt.plot(data_date, to_plot_data_y_train, label="Prices (train)", color=config["plots"]["color_train"])
-    plt.plot(data_date, to_plot_data_y_val, label="Prices (validation)", color=config["plots"]["color_val"])
-    xticks = [data_date[i] if ((i%config["plots"]["xticks_interval"]==0 and (num_data_points-i) > config["plots"]["xticks_interval"]) or i==num_data_points-1) else None for i in range(num_data_points)] # make x ticks nice
-    x = np.arange(0,len(xticks))
-    plt.xticks(x, xticks, rotation='vertical')
-    plt.title("Daily close prices for " + config["alpha_vantage"]["symbol"] + " - showing training and validation data")
-    plt.grid(visible=None, which='major', axis='y', linestyle='--')
-    plt.legend()
-    plt.show()
-    fig.savefig('Fig_2.png', transparent=False, dpi=80, bbox_inches="tight")
-
+print(data_x_train.shape)
+print(data_x_val.shape)
+print(data_y_train.shape)
+print(data_y_val.shape)
 
 class TimeSeriesDataset(Dataset):
     def __init__(self, x, y):
-        x = np.expand_dims(x, 2)  # in our case, we have only 1 feature, so we need to convert `x` into [batch, sequence, features] for LSTM
-        # come dice il nome, expand_dims aumenta le dimensioni di un array
-        self.x = x.astype(np.float32) # cambia il tipo
+        x = np.expand_dims(x,
+                           2)  # in our case, we have only 1 feature, so we need to convert `x` into [batch, sequence, features] for LSTM
+        self.x = x.astype(np.float32)
         self.y = y.astype(np.float32)
 
     def __len__(self):
@@ -236,16 +115,14 @@ class TimeSeriesDataset(Dataset):
     def __getitem__(self, idx):
         return (self.x[idx], self.y[idx])
 
-# crei i dataset di allenamento e test
 dataset_train = TimeSeriesDataset(data_x_train, data_y_train)
 dataset_val = TimeSeriesDataset(data_x_val, data_y_val)
-# stampa dimensioni dei dataset
+
 print("Train data shape", dataset_train.x.shape, dataset_train.y.shape)
 print("Validation data shape", dataset_val.x.shape, dataset_val.y.shape)
-# carica i dataset
-train_dataloader = DataLoader(dataset_train, batch_size=config["training"]["batch_size"], shuffle=True) # DataLoader e' di PyThorch
-val_dataloader = DataLoader(dataset_val, batch_size=config["training"]["batch_size"], shuffle=True)
 
+train_dataloader = DataLoader(dataset_train, batch_size=config["training"]["batch_size"], shuffle=True)
+val_dataloader = DataLoader(dataset_val, batch_size=config["training"]["batch_size"], shuffle=True)
 
 class LSTMModel(nn.Module):
     def __init__(self, input_size=1, hidden_layer_size=32, num_layers=2, output_size=1, dropout=0.2):
@@ -255,7 +132,7 @@ class LSTMModel(nn.Module):
         self.linear_1 = nn.Linear(input_size, hidden_layer_size)
         self.relu = nn.ReLU()
         self.lstm = nn.LSTM(hidden_layer_size, hidden_size=self.hidden_layer_size, num_layers=num_layers,
-                            batch_first=True) 
+                            batch_first=True)
         self.dropout = nn.Dropout(dropout)
         self.linear_2 = nn.Linear(num_layers * hidden_layer_size, output_size)
 
@@ -288,7 +165,6 @@ class LSTMModel(nn.Module):
         predictions = self.linear_2(x)
         return predictions[:, -1]
 
-
 def run_epoch(dataloader, is_training=False):
     epoch_loss = 0
 
@@ -319,11 +195,9 @@ def run_epoch(dataloader, is_training=False):
 
     return epoch_loss, lr
 
-# le due righe di seguito sono le stesse che si trovano prima delle def di classe e di fz qua sopra, non capisco la ripetizione: non mi sembra ne utile ne dannosa
 train_dataloader = DataLoader(dataset_train, batch_size=config["training"]["batch_size"], shuffle=True)
 val_dataloader = DataLoader(dataset_val, batch_size=config["training"]["batch_size"], shuffle=True)
 
-# creazione della rete lstm
 model = LSTMModel(input_size=config["model"]["input_size"], hidden_layer_size=config["model"]["lstm_size"],
                   num_layers=config["model"]["num_lstm_layers"], output_size=1, dropout=config["model"]["dropout"])
 model = model.to(config["training"]["device"])
@@ -332,7 +206,6 @@ criterion = nn.MSELoss()
 optimizer = optim.Adam(model.parameters(), lr=config["training"]["learning_rate"], betas=(0.9, 0.98), eps=1e-9)
 scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=config["training"]["scheduler_step_size"], gamma=0.1)
 
-# allenamento
 for epoch in range(config["training"]["num_epoch"]):
     loss_train, lr_train = run_epoch(train_dataloader, is_training=True)
     loss_val, lr_val = run_epoch(val_dataloader)
@@ -340,9 +213,6 @@ for epoch in range(config["training"]["num_epoch"]):
 
     print('Epoch[{}/{}] | loss train:{:.6f}, test:{:.6f} | lr:{:.6f}'
           .format(epoch + 1, config["training"]["num_epoch"], loss_train, loss_val, lr_train))
-    file_output.write('Epoch[{}/{}] | loss train:{:.6f}, test:{:.6f} | lr:{:.6f}'
-          .format(epoch + 1, config["training"]["num_epoch"], loss_train, loss_val, lr_train))
-
 
 # here we re-initialize dataloader so the data doesn't shuffled, so we can plot the values by date
 train_dataloader = DataLoader(dataset_train, batch_size=config["training"]["batch_size"], shuffle=False)
@@ -351,9 +221,7 @@ val_dataloader = DataLoader(dataset_val, batch_size=config["training"]["batch_si
 model.eval()
 
 # predict on the training data, to see how well the model managed to learn and memorize
-
 predicted_train = np.array([])
-
 for idx, (x, y) in enumerate(train_dataloader):
     x = x.to(config["training"]["device"])
     out = model(x)
@@ -361,128 +229,83 @@ for idx, (x, y) in enumerate(train_dataloader):
     predicted_train = np.concatenate((predicted_train, out))
 
 # predict on the validation data, to see how the model does
-
 predicted_val = np.array([])
-
 for idx, (x, y) in enumerate(val_dataloader):
     x = x.to(config["training"]["device"])
     out = model(x)
     out = out.cpu().detach().numpy()
     predicted_val = np.concatenate((predicted_val, out))
 
-
-if(make_plots == True):
+# plots
+if disegna == 1:
     # prepare data for plotting
-
     to_plot_data_y_train_pred = np.zeros(num_data_points)
     to_plot_data_y_val_pred = np.zeros(num_data_points)
-
     to_plot_data_y_train_pred[config["data"]["window_size"]:split_index+config["data"]["window_size"]] = scaler.inverse_transform(predicted_train)
-    to_plot_data_y_val_pred[split_index+config["data"]["window_size"]:] = scaler.inverse_transform(predicted_val)
-
+    to_plot_data_y_val_pred[split_index+config["data"]["window_size"]-1:] = scaler.inverse_transform(predicted_val)
     to_plot_data_y_train_pred = np.where(to_plot_data_y_train_pred == 0, None, to_plot_data_y_train_pred)
     to_plot_data_y_val_pred = np.where(to_plot_data_y_val_pred == 0, None, to_plot_data_y_val_pred)
 
-    # plots
-
     fig = figure(figsize=(25, 5), dpi=80)
     fig.patch.set_facecolor((1.0, 1.0, 1.0))
-    plt.plot(data_date, data_close_price, label="Actual prices", color=config["plots"]["color_actual"])
-    plt.plot(data_date, to_plot_data_y_train_pred, label="Predicted prices (train)", color=config["plots"]["color_pred_train"])
-    plt.plot(data_date, to_plot_data_y_val_pred, label="Predicted prices (validation)", color=config["plots"]["color_pred_val"])
+    plt.plot(data_close_price, label="Actual prices", color=config["plots"]["color_actual"])
+    plt.plot(to_plot_data_y_train_pred, label="Predicted prices (train)", color=config["plots"]["color_pred_train"])
+    plt.plot(to_plot_data_y_val_pred, label="Predicted prices (validation)", color=config["plots"]["color_pred_val"])
     plt.title("Compare predicted prices to actual prices")
-    xticks = [data_date[i] if ((i%config["plots"]["xticks_interval"]==0 and (num_data_points-i) > config["plots"]["xticks_interval"]) or i==num_data_points-1) else None for i in range(num_data_points)] # make x ticks nice
-    x = np.arange(0,len(xticks))
-    plt.xticks(x, xticks, rotation='vertical')
-    plt.grid(visible=None, which='major', axis='y', linestyle='--')
+    # xticks = [data_date[i] if ((i%config["plots"]["xticks_interval"]==0 and (num_data_points-i) > config["plots"]["xticks_interval"]) or i==num_data_points-1) else None for i in range(num_data_points)] # make x ticks nice
+    # x = np.arange(0,len(xticks))
+    # plt.xticks(x, xticks, rotation='vertical')
+    # plt.grid(b=None, which='major', axis='y', linestyle='--')
     plt.legend()
+    plt.grid(which='both', axis='x')
+    plt.savefig("quarter_final_plot.png", dpi=300)
     plt.show()
-    fig.savefig('predicted prices vs. actual prices.png', transparent=False, dpi=80, bbox_inches="tight")
 
+# plots
+if disegna == 1:
     # prepare data for plotting the zoomed in view of the predicted prices vs. actual prices
-
     to_plot_data_y_val_subset = scaler.inverse_transform(data_y_val)
     to_plot_predicted_val = scaler.inverse_transform(predicted_val)
     to_plot_data_date = data_date[split_index+config["data"]["window_size"]:]
 
-    # plots
-
     fig = figure(figsize=(25, 5), dpi=80)
     fig.patch.set_facecolor((1.0, 1.0, 1.0))
-    plt.plot(to_plot_data_date, to_plot_data_y_val_subset, label="Actual prices", color=config["plots"]["color_actual"])
-    plt.plot(to_plot_data_date, to_plot_predicted_val, label="Predicted prices (validation)", color=config["plots"]["color_pred_val"])
+    plt.plot(to_plot_data_y_val_subset, label="Actual prices", color=config["plots"]["color_actual"])
+    plt.plot(to_plot_predicted_val, label="Predicted prices (validation)", color=config["plots"]["color_pred_val"])
     plt.title("Zoom in to examine predicted price on validation data portion")
-    xticks = [to_plot_data_date[i] if ((i%int(config["plots"]["xticks_interval"]/5)==0 and (len(to_plot_data_date)-i) > config["plots"]["xticks_interval"]/6) or i==len(to_plot_data_date)-1) else None for i in range(len(to_plot_data_date))] # make x ticks nice
-    xs = np.arange(0,len(xticks))
-    plt.xticks(xs, xticks, rotation='vertical')
-    plt.grid(visible=None, which='major', axis='y', linestyle='--')
+    # xticks = [to_plot_data_date[i] if ((i%int(config["plots"]["xticks_interval"]/5)==0 and (len(to_plot_data_date)-i) > config["plots"]["xticks_interval"]/6) or i==len(to_plot_data_date)-1) else None for i in range(len(to_plot_data_date))] # make x ticks nice
+    # xs = np.arange(0,len(xticks))
+    # plt.xticks(xs, xticks, rotation='vertical')
+    # plt.grid(b=None, which='major', axis='y', linestyle='--')
     plt.legend()
+    plt.grid(which='both', axis='x')
+    plt.savefig("semifinal_plot.png", dpi=300)
     plt.show()
-    fig.savefig('predicted prices vs. actual zoomed.png', transparent=False, dpi=80, bbox_inches="tight")
 
+np.savetxt("reali.csv", np.flip(to_plot_data_y_val_subset, 0), delimiter='\n', header="Reali", fmt="%2f")
+np.savetxt("previsti.csv", np.flip(to_plot_predicted_val, 0), delimiter='\n', header="Previsti", fmt="%2f")
 
-# +++++++++++++++++++++++++++++++++++++++++++++++++
+def metriche(true, pred, text=""):
+    MAPE = "MAPE: " +  str(mean_absolute_percentage_error(true, pred)*100) + "%"
+    MSE = "MSE: " +  str(mean_squared_error(true, pred))
+    
+    metrics = (MAPE +'\n' + MSE)
+    print(text, '\n', metrics)
+    with open('textfile.txt', 'a') as f: f.write('\n' + text + '\n' + metrics)
+
+metriche(to_plot_data_y_val_subset, to_plot_predicted_val, "eval")
+
 # predict the closing price of the next trading day
-
 model.eval()
 
-x = torch.tensor(data_x_unseen).float().to(config["training"]["device"]).unsqueeze(0).unsqueeze(2) # this is the data type and shape required: [batch, sequence, feature]
-print(x)
+x = torch.tensor(data_x_unseen).float().to(config["training"]["device"]).unsqueeze(0).unsqueeze(2) # this is the data type and shape required, [batch, sequence, feature]
 prediction = model(x)
 prediction = prediction.cpu().detach().numpy()
+prediction = scaler.inverse_transform(prediction)
 
+print("Actual: ", last_true,  "Prediction:", prediction)
 
-if(make_plots == True):
-    # prepare plots
+last_true_ar = []
+last_true_ar = np.append(last_true_ar, last_true)
+metriche(last_true_ar, prediction, "new")
 
-    plot_range = 10
-    to_plot_data_y_val = np.zeros(plot_range)
-    to_plot_data_y_val_pred = np.zeros(plot_range)
-    to_plot_data_y_test_pred = np.zeros(plot_range)
-
-    to_plot_data_y_val[:plot_range-1] = scaler.inverse_transform(data_y_val)[-plot_range+1:]
-    to_plot_data_y_val_pred[:plot_range-1] = scaler.inverse_transform(predicted_val)[-plot_range+1:]
-
-    to_plot_data_y_test_pred[plot_range-1] = scaler.inverse_transform(prediction)
-    # fa una conversione da array a scalare, occhio che � deprecato in numpy!
-
-    to_plot_data_y_val = np.where(to_plot_data_y_val == 0, None, to_plot_data_y_val)
-    to_plot_data_y_val_pred = np.where(to_plot_data_y_val_pred == 0, None, to_plot_data_y_val_pred)
-    to_plot_data_y_test_pred = np.where(to_plot_data_y_test_pred == 0, None, to_plot_data_y_test_pred)
-
-    # plot
-
-    plot_date_test = data_date[-plot_range+1:]
-    plot_date_test.append("tomorrow")
-
-    fig = figure(figsize=(25, 5), dpi=80)
-    fig.patch.set_facecolor((1.0, 1.0, 1.0))
-    plt.plot(plot_date_test, to_plot_data_y_val, label="Actual prices", marker=".", markersize=10, color=config["plots"]["color_actual"])
-    plt.plot(plot_date_test, to_plot_data_y_val_pred, label="Past predicted prices", marker=".", markersize=10, color=config["plots"]["color_pred_val"])
-    plt.plot(plot_date_test, to_plot_data_y_test_pred, label="Predicted price for next day", marker=".", markersize=20, color=config["plots"]["color_pred_test"])
-    plt.title("Predicting the close price of the next trading day")
-    plt.grid(visible=None, which='major', axis='y', linestyle='--')
-    plt.legend()
-    plt.show()
-    fig.savefig('tomorrow.png', transparent=False, dpi=80, bbox_inches="tight")
-
-#print("Predicted close price of the next trading day:", np.round(to_plot_data_y_test_pred[plot_range-1], 2)) # originale
-print("Predicted close price of the next trading day:", np.round(scaler.inverse_transform(prediction), 2)) # analogo
-np.savetxt("predizioni.txt", np.round(scaler.inverse_transform(prediction), 2))
-
-# le previsioni che vengono effettuate qua non sono visibilmente attendibili (+20% in 10 giorni, ad esempio)
-# il problema è che carico solo l'ultiamo previsione e non gli ultimi relativi 20 giorni, credo, ora ci lavoro
-# agg: anche avendo modificato in tal senso la previsione mi pare eccessivamente ottimista (da 140 a 165 in dieci gg)
-for i in range(10):
-    data_x_unseen = data_x_unseen[1:]
-    np.append(data_x_unseen, prediction)
-    
-    x = torch.tensor(prediction).float().to(config["training"]["device"]).unsqueeze(0).unsqueeze(2) 
-    prediction = model(x)
-    prediction = prediction.cpu().detach().numpy()
-    print("Predicted close price of the next day:", np.round(scaler.inverse_transform(prediction), 2))
-    # previsioni = np.concatenate(previsioni, np.round(scaler.inverse_transform(prediction), 2)) # non funziona
-
-# np.savetxt("predizioni.txt", previsioni)
-file_output.close()
-print("FINE")
